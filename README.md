@@ -1,4 +1,4 @@
-# Panscience Document Q&A
+# Multimedia Q&A Platform
 
 An AI-powered full-stack web application for document and multimedia question-answering. Upload PDFs, audio, or video files and interact with an intelligent chatbot that answers questions based on your content using Retrieval-Augmented Generation (RAG).
 
@@ -64,8 +64,8 @@ An AI-powered full-stack web application for document and multimedia question-an
 1. **Clone the repository:**
 
    ```bash
-   git clone https://github.com/hjjain/panscience-qa.git
-   cd panscience-qa
+   git clone https://github.com/hjjain/multimedia-qa-platform.git
+   cd multimedia-qa-platform
    ```
 
 2. **Create environment file:**
@@ -220,7 +220,7 @@ npm run dev  # Starts on http://localhost:5173
 ## Project Structure
 
 ```
-panscience-qa/
+multimedia-qa-platform/
 ├── backend/
 │   ├── app/
 │   │   ├── __init__.py
