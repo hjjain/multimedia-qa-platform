@@ -1,4 +1,4 @@
-"""LLM service using Replicate (Llama) for summarization and Q&A."""
+"""LLM service using Replicate (GPT-5.2) for summarization and Q&A."""
 
 import os
 import replicate
@@ -9,7 +9,7 @@ from app.config import get_settings
 
 
 class LLMService:
-    """Handles summarization and Q&A using Replicate Llama."""
+    """Handles summarization and Q&A using Replicate GPT-5.2."""
 
     def __init__(self):
         settings = get_settings()
@@ -25,16 +25,20 @@ class LLMService:
             input={
                 "prompt": (
                     "Please summarize the following content "
-                    "concisely, highlighting key points:"
-                    f"\n\n{text[:10000]}"
+                    "concisely, highlighting key points:\n\n"
+                    f"{text[:10000]}"
                 ),
-                "system_prompt": (
-                    "You are a helpful assistant that "
-                    "summarizes documents. Provide a clear, "
-                    "structured summary."
-                ),
-                "max_tokens": 500,
-                "temperature": 0.3,
+                "messages": [
+                    {
+                        "role": "system",
+                        "content": (
+                            "You are a helpful assistant that "
+                            "summarizes documents. Provide a "
+                            "clear, structured summary."
+                        ),
+                    }
+                ],
+                "reasoning_effort": "low",
             },
         )
         return "".join(output)
@@ -52,7 +56,7 @@ class LLMService:
 
         context = "\n\n".join(context_chunks)
 
-        system_prompt = (
+        system_msg = (
             "You are a helpful assistant answering questions "
             "based on document content. "
             "Answer based ONLY on the provided context. "
@@ -70,23 +74,21 @@ class LLMService:
             )
             context += f"\n\nTimestamped Transcript:\n{ts_text}"
 
-        # Build prompt with history
-        prompt_parts = []
+        # Build messages with conversation history
+        messages = [{"role": "system", "content": system_msg}]
         for msg in conversation_history[-6:]:
-            role = "User" if msg.role == "user" else "Assistant"
-            prompt_parts.append(f"{role}: {msg.content}")
-        prompt_parts.append(
-            f"Context:\n{context}\n\nQuestion: {question}"
-        )
-        prompt = "\n\n".join(prompt_parts)
+            messages.append(
+                {"role": msg.role, "content": msg.content}
+            )
+
+        prompt = f"Context:\n{context}\n\nQuestion: {question}"
 
         output = replicate.run(
             self.model,
             input={
                 "prompt": prompt,
-                "system_prompt": system_prompt,
-                "max_tokens": 1000,
-                "temperature": 0.5,
+                "messages": messages,
+                "reasoning_effort": "medium",
             },
         )
         answer = "".join(output)
@@ -136,6 +138,17 @@ class LLMService:
 
         context = "\n\n".join(context_chunks)
 
+        messages = [
+            {
+                "role": "system",
+                "content": "Answer based only on the context.",
+            }
+        ]
+        for msg in conversation_history[-6:]:
+            messages.append(
+                {"role": msg.role, "content": msg.content}
+            )
+
         output = replicate.run(
             self.model,
             input={
@@ -143,11 +156,8 @@ class LLMService:
                     f"Context:\n{context}\n\n"
                     f"Question: {question}"
                 ),
-                "system_prompt": (
-                    "Answer based only on the context."
-                ),
-                "max_tokens": 1000,
-                "temperature": 0.5,
+                "messages": messages,
+                "reasoning_effort": "medium",
             },
         )
         for token in output:

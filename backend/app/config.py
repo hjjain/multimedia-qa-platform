@@ -12,7 +12,7 @@ class Settings(BaseSettings):
     replicate_api_token: str = ""
 
     # Model configuration
-    llm_model: str = "meta/meta-llama-3-8b-instruct"
+    llm_model: str = "openai/gpt-5.2"
     whisper_model: str = "openai/whisper"
 
     # MongoDB

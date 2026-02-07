@@ -5,7 +5,7 @@ An AI-powered full-stack web application for document and multimedia question-an
 ## Features
 
 - **Multi-format Upload** - Support for PDF, audio (MP3, WAV, M4A), and video (MP4, WebM) files
-- **AI-Powered Q&A** - RAG-based chatbot using LangChain + Llama 3 for accurate, context-aware answers
+- **AI-Powered Q&A** - RAG-based chatbot using GPT-5.2 via Replicate for accurate, context-aware answers
 - **Automatic Summarization** - AI-generated summaries for all uploaded content
 - **Timestamp Extraction** - Segment-level timestamps for audio/video via Whisper
 - **Click-to-Play** - Navigate to specific timestamps in media files directly from chat responses
@@ -19,7 +19,7 @@ An AI-powered full-stack web application for document and multimedia question-an
 |-------|-----------|
 | **Backend** | FastAPI (Python 3.11) |
 | **Frontend** | React 18, Vite, Tailwind CSS |
-| **AI/ML** | Replicate (Llama 3 for LLM, Whisper for transcription) |
+| **AI/ML** | Replicate (OpenAI GPT-5.2 for LLM, Whisper for transcription) |
 | **Vector Search** | In-memory cosine similarity (swappable for Pinecone/FAISS) |
 | **Database** | MongoDB 7 (document metadata) |
 | **Cache** | Redis 7 |
@@ -31,7 +31,7 @@ An AI-powered full-stack web application for document and multimedia question-an
 ```
 ┌─────────────────┐     ┌─────────────────┐     ┌─────────────────┐
 │   React + Vite  │────▶│    FastAPI       │────▶│   Replicate API │
-│   Frontend      │◀────│    Backend       │◀────│ Llama 3/Whisper │
+│   Frontend      │◀────│    Backend       │◀────│ GPT-5.2/Whisper │
 └─────────────────┘     └────────┬────────┘     └─────────────────┘
                                  │
                 ┌────────────────┼────────────────┐
@@ -47,8 +47,8 @@ An AI-powered full-stack web application for document and multimedia question-an
 1. **Upload** - User uploads a file (PDF/audio/video)
 2. **Processing** - Backend extracts text (PDF) or transcribes (audio/video with timestamps via Whisper)
 3. **Embedding** - Text chunks are embedded locally and stored in an in-memory vector store
-4. **Summarization** - Llama 3 generates a concise summary via Replicate
-5. **Q&A** - User asks questions; relevant chunks are retrieved via cosine similarity and passed to Llama 3
+4. **Summarization** - GPT-5.2 generates a concise summary via Replicate
+5. **Q&A** - User asks questions; relevant chunks are retrieved via cosine similarity and passed to GPT-5.2
 6. **Timestamps** - For media files, relevant timestamps are linked to answers with playback support
 
 ## Quick Start
@@ -235,7 +235,7 @@ multimedia-qa-platform/
 │   │   │   ├── video_service.py # Video audio extraction & transcription
 │   │   │   ├── embedding_service.py  # Local hash-based embeddings
 │   │   │   ├── vector_store.py  # In-memory vector search
-│   │   │   └── llm_service.py   # Replicate Llama summarization & Q&A
+│   │   │   └── llm_service.py   # GPT-5.2 summarization & Q&A via Replicate
 │   │   └── utils/
 │   │       └── helpers.py       # Utility functions
 │   ├── tests/
@@ -286,10 +286,10 @@ The GitHub Actions workflow (`.github/workflows/ci.yml`) runs on every push and 
 
 | Variable | Required | Default | Description |
 |----------|----------|---------|-------------|
-| `REPLICATE_API_TOKEN` | Yes | - | Replicate API token for Llama 3 and Whisper |
+| `REPLICATE_API_TOKEN` | Yes | - | Replicate API token for GPT-5.2 and Whisper |
 | `MONGODB_URL` | No | `mongodb://mongodb:27017` | MongoDB connection string |
 | `REDIS_URL` | No | `redis://redis:6379` | Redis connection string |
-| `LLM_MODEL` | No | `meta/meta-llama-3-8b-instruct` | Replicate LLM model |
+| `LLM_MODEL` | No | `openai/gpt-5.2` | Replicate LLM model |
 | `WHISPER_MODEL` | No | `openai/whisper` | Replicate Whisper model |
 | `MAX_FILE_SIZE_MB` | No | `100` | Maximum upload file size in MB |
 
