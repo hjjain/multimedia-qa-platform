@@ -1,15 +1,10 @@
-version: '3.8'
-
 services:
   backend:
     build: ./backend
     ports:
       - "8000:8000"
     environment:
-      - OPENAI_API_KEY=${OPENAI_API_KEY}
-      - PINECONE_API_KEY=${PINECONE_API_KEY}
-      - PINECONE_ENVIRONMENT=${PINECONE_ENVIRONMENT:-us-east-1}
-      - PINECONE_INDEX_NAME=${PINECONE_INDEX_NAME:-panscience-docs}
+      - REPLICATE_API_TOKEN=${REPLICATE_API_TOKEN}
       - MONGODB_URL=mongodb://mongodb:27017
       - REDIS_URL=redis://redis:6379
     volumes:

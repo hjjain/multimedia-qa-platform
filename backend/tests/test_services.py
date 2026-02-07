@@ -1,11 +1,11 @@
-"""Tests for backend services (PDF, embedding, LLM, etc.)."""
+"""Tests for backend services (PDF, embedding, LLM, vector store)."""
 
 import pytest
+import math
 from unittest.mock import patch, MagicMock, AsyncMock
 from app.services.pdf_service import PDFService
 from app.services.embedding_service import EmbeddingService
-from app.services.llm_service import LLMService
-from app.services.vector_store import VectorStore
+from app.services.vector_store import VectorStore, _store
 from app.models.document import TimestampedSegment
 from app.models.chat import ChatMessage
 from app.utils.helpers import (
@@ -20,9 +20,7 @@ class TestPDFService:
 
     @pytest.mark.asyncio
     async def test_extract_text(self):
-        """Test PDF text extraction from bytes."""
         service = PDFService()
-
         with patch(
             "app.services.pdf_service.PdfReader"
         ) as mock_reader:
@@ -31,15 +29,12 @@ class TestPDFService:
                 "Test content from page"
             )
             mock_reader.return_value.pages = [mock_page]
-
             text = await service.extract_text(b"%PDF-1.4")
             assert text == "Test content from page"
 
     @pytest.mark.asyncio
     async def test_extract_text_multiple_pages(self):
-        """Test extraction from multi-page PDF."""
         service = PDFService()
-
         with patch(
             "app.services.pdf_service.PdfReader"
         ) as mock_reader:
@@ -48,40 +43,32 @@ class TestPDFService:
             page2 = MagicMock()
             page2.extract_text.return_value = " Page 2"
             mock_reader.return_value.pages = [page1, page2]
-
             text = await service.extract_text(b"%PDF-1.4")
             assert text == "Page 1 Page 2"
 
     @pytest.mark.asyncio
     async def test_extract_text_empty_page(self):
-        """Test extraction when page returns None."""
         service = PDFService()
-
         with patch(
             "app.services.pdf_service.PdfReader"
         ) as mock_reader:
             mock_page = MagicMock()
             mock_page.extract_text.return_value = None
             mock_reader.return_value.pages = [mock_page]
-
             text = await service.extract_text(b"%PDF-1.4")
             assert text == ""
 
     @pytest.mark.asyncio
     async def test_chunk_text(self):
-        """Test text chunking creates proper sized chunks."""
         service = PDFService()
         text = "This is a test sentence. " * 100
-
         chunks = await service.chunk_text(text)
         assert len(chunks) > 0
-        assert all(len(chunk) <= 1000 for chunk in chunks)
+        assert all(len(c) <= 1000 for c in chunks)
 
     @pytest.mark.asyncio
     async def test_process_pdf(self):
-        """Test full PDF processing pipeline."""
         service = PDFService()
-
         with patch(
             "app.services.pdf_service.PdfReader"
         ) as mock_reader:
@@ -90,7 +77,6 @@ class TestPDFService:
                 "Test content " * 50
             )
             mock_reader.return_value.pages = [mock_page]
-
             text, chunks = await service.process_pdf(
                 b"%PDF-1.4"
             )
@@ -99,115 +85,99 @@ class TestPDFService:
 
 
 class TestEmbeddingService:
-    """Tests for embedding generation."""
+    """Tests for local hash-based embeddings."""
 
     @pytest.mark.asyncio
     async def test_get_embedding(self):
-        """Test single embedding generation."""
-        with patch("app.services.embedding_service.OpenAI") as m:
-            mock_client = MagicMock()
-            embed_resp = MagicMock()
-            embed_resp.data = [
-                MagicMock(embedding=[0.1] * 1536)
-            ]
-            mock_client.embeddings.create.return_value = (
-                embed_resp
-            )
-            m.return_value = mock_client
-
-            service = EmbeddingService()
-            embedding = await service.get_embedding("Test text")
-            assert len(embedding) == 1536
+        service = EmbeddingService()
+        emb = await service.get_embedding("Hello world")
+        assert len(emb) == 256
+        assert isinstance(emb[0], float)
 
     @pytest.mark.asyncio
-    async def test_get_embeddings_batch(self):
-        """Test batch embedding generation."""
-        with patch("app.services.embedding_service.OpenAI") as m:
-            mock_client = MagicMock()
-            embed_resp = MagicMock()
-            embed_resp.data = [
-                MagicMock(embedding=[0.1] * 1536),
-                MagicMock(embedding=[0.2] * 1536),
-            ]
-            mock_client.embeddings.create.return_value = (
-                embed_resp
-            )
-            m.return_value = mock_client
+    async def test_embedding_deterministic(self):
+        service = EmbeddingService()
+        e1 = await service.get_embedding("Hello world")
+        e2 = await service.get_embedding("Hello world")
+        assert e1 == e2
 
-            service = EmbeddingService()
-            embeddings = await service.get_embeddings_batch(
-                ["Text 1", "Text 2"]
-            )
-            assert len(embeddings) == 2
-            assert len(embeddings[0]) == 1536
+    @pytest.mark.asyncio
+    async def test_embedding_different_texts(self):
+        service = EmbeddingService()
+        e1 = await service.get_embedding("Hello world")
+        e2 = await service.get_embedding("Goodbye moon")
+        assert e1 != e2
+
+    @pytest.mark.asyncio
+    async def test_embeddings_batch(self):
+        service = EmbeddingService()
+        embs = await service.get_embeddings_batch(
+            ["Text 1", "Text 2"]
+        )
+        assert len(embs) == 2
+        assert len(embs[0]) == 256
+
+    @pytest.mark.asyncio
+    async def test_embedding_normalized(self):
+        service = EmbeddingService()
+        emb = await service.get_embedding("test normalization")
+        norm = math.sqrt(sum(v * v for v in emb))
+        assert abs(norm - 1.0) < 0.01
+
+    @pytest.mark.asyncio
+    async def test_empty_text_embedding(self):
+        service = EmbeddingService()
+        emb = await service.get_embedding("")
+        assert len(emb) == 256
 
 
 class TestLLMService:
-    """Tests for LLM summarization and Q&A."""
+    """Tests for Replicate LLM service."""
 
     @pytest.mark.asyncio
     async def test_generate_summary(self):
-        """Test summary generation."""
-        with patch("app.services.llm_service.OpenAI") as m:
-            mock_client = MagicMock()
-            chat_resp = MagicMock()
-            chat_resp.choices = [
-                MagicMock(
-                    message=MagicMock(content="Test summary")
-                )
-            ]
-            mock_client.chat.completions.create.return_value = (
-                chat_resp
+        with patch(
+            "app.services.llm_service.replicate"
+        ) as mock_rep:
+            mock_rep.run.return_value = iter(
+                ["This is ", "a summary."]
             )
-            m.return_value = mock_client
+            from app.services.llm_service import LLMService
 
             service = LLMService()
             summary = await service.generate_summary(
                 "Long document text..."
             )
-            assert summary == "Test summary"
+            assert summary == "This is a summary."
+            mock_rep.run.assert_called_once()
 
     @pytest.mark.asyncio
     async def test_answer_question(self):
-        """Test question answering without timestamps."""
-        with patch("app.services.llm_service.OpenAI") as m:
-            mock_client = MagicMock()
-            chat_resp = MagicMock()
-            chat_resp.choices = [
-                MagicMock(
-                    message=MagicMock(content="Test answer")
-                )
-            ]
-            mock_client.chat.completions.create.return_value = (
-                chat_resp
+        with patch(
+            "app.services.llm_service.replicate"
+        ) as mock_rep:
+            mock_rep.run.return_value = iter(
+                ["The answer ", "is 42."]
             )
-            m.return_value = mock_client
+            from app.services.llm_service import LLMService
 
             service = LLMService()
             answer, ts = await service.answer_question(
-                "What is this?",
-                ["Context chunk 1", "Context chunk 2"],
+                "What is the answer?",
+                ["Context chunk"],
             )
-            assert answer == "Test answer"
+            assert answer == "The answer is 42."
             assert ts is None
 
     @pytest.mark.asyncio
-    async def test_answer_question_with_timestamps(self):
-        """Test Q&A with timestamp context."""
-        with patch("app.services.llm_service.OpenAI") as m:
-            mock_client = MagicMock()
-            chat_resp = MagicMock()
-            chat_resp.choices = [
-                MagicMock(
-                    message=MagicMock(
-                        content="The introduction covers basics"
-                    )
-                )
-            ]
-            mock_client.chat.completions.create.return_value = (
-                chat_resp
+    async def test_answer_with_timestamps(self):
+        with patch(
+            "app.services.llm_service.replicate"
+        ) as mock_rep:
+            mock_rep.run.return_value = iter(
+                ["The introduction covers basics"]
             )
-            m.return_value = mock_client
+            from app.services.llm_service import LLMService
 
             service = LLMService()
             timestamps = [
@@ -218,7 +188,7 @@ class TestLLMService:
                 )
             ]
             answer, relevant = await service.answer_question(
-                "What is the intro about?",
+                "What is the intro?",
                 ["Context"],
                 timestamps,
             )
@@ -226,20 +196,12 @@ class TestLLMService:
             assert relevant is not None
 
     @pytest.mark.asyncio
-    async def test_answer_question_with_history(self):
-        """Test Q&A with conversation history."""
-        with patch("app.services.llm_service.OpenAI") as m:
-            mock_client = MagicMock()
-            chat_resp = MagicMock()
-            chat_resp.choices = [
-                MagicMock(
-                    message=MagicMock(content="Elaboration")
-                )
-            ]
-            mock_client.chat.completions.create.return_value = (
-                chat_resp
-            )
-            m.return_value = mock_client
+    async def test_answer_with_history(self):
+        with patch(
+            "app.services.llm_service.replicate"
+        ) as mock_rep:
+            mock_rep.run.return_value = iter(["Elaboration"])
+            from app.services.llm_service import LLMService
 
             service = LLMService()
             history = [
@@ -256,8 +218,9 @@ class TestLLMService:
             assert answer == "Elaboration"
 
     def test_find_relevant_timestamps(self):
-        """Test timestamp relevance matching."""
-        with patch("app.services.llm_service.OpenAI"):
+        with patch("app.services.llm_service.replicate"):
+            from app.services.llm_service import LLMService
+
             service = LLMService()
             timestamps = [
                 TimestampedSegment(
@@ -268,18 +231,18 @@ class TestLLMService:
                 TimestampedSegment(
                     start_time=5.0,
                     end_time=10.0,
-                    text="Short text",
+                    text="Short",
                 ),
             ]
-
             result = service._find_relevant_timestamps(
                 "python programming is great", timestamps
             )
             assert len(result) >= 1
 
     def test_find_relevant_timestamps_empty(self):
-        """Test timestamp matching with no matches."""
-        with patch("app.services.llm_service.OpenAI"):
+        with patch("app.services.llm_service.replicate"):
+            from app.services.llm_service import LLMService
+
             service = LLMService()
             timestamps = [
                 TimestampedSegment(
@@ -288,76 +251,209 @@ class TestLLMService:
                     text="abc",
                 ),
             ]
-
             result = service._find_relevant_timestamps(
-                "xyz completely different", timestamps
+                "xyz different", timestamps
             )
             assert len(result) == 0
 
+    @pytest.mark.asyncio
+    async def test_stream_answer(self):
+        with patch(
+            "app.services.llm_service.replicate"
+        ) as mock_rep:
+            mock_rep.run.return_value = iter(
+                ["chunk1", "chunk2"]
+            )
+            from app.services.llm_service import LLMService
+
+            service = LLMService()
+            chunks = []
+            async for c in service.stream_answer(
+                "Question?", ["Context"]
+            ):
+                chunks.append(c)
+            assert "".join(chunks) == "chunk1chunk2"
+
 
 class TestVectorStore:
-    """Tests for Pinecone vector store operations."""
+    """Tests for in-memory vector store."""
 
     @pytest.mark.asyncio
-    async def test_upsert_chunks(self, mock_pinecone_index):
-        """Test storing chunks in vector store."""
-        with patch(
-            "app.services.vector_store.index",
-            mock_pinecone_index,
-        ):
-            store = VectorStore()
-            store.index = mock_pinecone_index
+    async def test_upsert_chunks(self):
+        store = VectorStore()
+        ids = await store.upsert_chunks(
+            "doc-1",
+            ["chunk A", "chunk B"],
+            [[1.0] + [0.0] * 255, [0.0, 1.0] + [0.0] * 254],
+        )
+        assert len(ids) == 2
+        assert ids[0] == "doc-1_0"
+        assert "doc-1" in _store
 
-            chunk_ids = await store.upsert_chunks(
-                "doc-1",
-                ["chunk 1", "chunk 2"],
-                [[0.1] * 1536, [0.2] * 1536],
+    @pytest.mark.asyncio
+    async def test_search(self):
+        store = VectorStore()
+        await store.upsert_chunks(
+            "doc-2",
+            ["Python rocks", "Java ok"],
+            [[1.0] + [0.0] * 255, [0.0, 1.0] + [0.0] * 254],
+        )
+        results = await store.search(
+            [1.0] + [0.0] * 255, "doc-2", top_k=2
+        )
+        assert len(results) == 2
+        assert results[0]["text"] == "Python rocks"
+        assert results[0]["score"] > results[1]["score"]
+
+    @pytest.mark.asyncio
+    async def test_search_empty(self):
+        store = VectorStore()
+        results = await store.search(
+            [0.1] * 256, "nonexistent", top_k=5
+        )
+        assert len(results) == 0
+
+    @pytest.mark.asyncio
+    async def test_delete_document(self):
+        store = VectorStore()
+        await store.upsert_chunks(
+            "doc-3", ["chunk"], [[0.1] * 256]
+        )
+        assert "doc-3" in _store
+        await store.delete_document("doc-3")
+        assert "doc-3" not in _store
+
+    @pytest.mark.asyncio
+    async def test_delete_nonexistent(self):
+        store = VectorStore()
+        await store.delete_document("never-existed")
+
+
+class TestAudioService:
+    """Tests for audio service with mocked Replicate."""
+
+    @pytest.mark.asyncio
+    async def test_transcribe(self):
+        with patch(
+            "app.services.audio_service.replicate"
+        ) as mock_rep:
+            mock_rep.run.return_value = {
+                "transcription": "Hello world",
+                "segments": [
+                    {
+                        "start": 0.0,
+                        "end": 5.0,
+                        "text": "Hello world",
+                    }
+                ],
+            }
+            from app.services.audio_service import (
+                AudioService,
             )
 
-            assert len(chunk_ids) == 2
-            assert chunk_ids[0] == "doc-1_0"
-            mock_pinecone_index.upsert.assert_called_once()
+            service = AudioService()
+            text, segs = (
+                await service.transcribe_with_timestamps(
+                    b"audio-bytes", "test.mp3"
+                )
+            )
+            assert text == "Hello world"
+            assert len(segs) == 1
+            assert segs[0].start_time == 0.0
 
     @pytest.mark.asyncio
-    async def test_search(self, mock_pinecone_index):
-        """Test searching for relevant chunks."""
-        mock_match = MagicMock()
-        mock_match.metadata = {
-            "text": "Test text",
-            "chunk_index": 0,
-        }
-        mock_match.score = 0.95
-        mock_pinecone_index.query.return_value = MagicMock(
-            matches=[mock_match]
+    async def test_transcribe_no_segments(self):
+        with patch(
+            "app.services.audio_service.replicate"
+        ) as mock_rep:
+            mock_rep.run.return_value = {
+                "transcription": "Some text",
+                "segments": [],
+            }
+            from app.services.audio_service import (
+                AudioService,
+            )
+
+            service = AudioService()
+            text, segs = (
+                await service.transcribe_with_timestamps(
+                    b"audio-bytes", "test.mp3"
+                )
+            )
+            assert text == "Some text"
+            assert len(segs) == 1
+
+    @pytest.mark.asyncio
+    async def test_get_timestamps_for_topic(self):
+        from app.services.audio_service import AudioService
+
+        service = AudioService()
+        segments = [
+            TimestampedSegment(
+                start_time=0.0,
+                end_time=5.0,
+                text="Introduction to Python",
+            ),
+            TimestampedSegment(
+                start_time=5.0,
+                end_time=10.0,
+                text="JavaScript basics",
+            ),
+        ]
+        results = await service.get_timestamps_for_topic(
+            segments, "Python"
+        )
+        assert len(results) == 1
+
+    @pytest.mark.asyncio
+    async def test_get_timestamps_no_match(self):
+        from app.services.audio_service import AudioService
+
+        service = AudioService()
+        segments = [
+            TimestampedSegment(
+                start_time=0.0,
+                end_time=5.0,
+                text="Hello",
+            ),
+        ]
+        results = await service.get_timestamps_for_topic(
+            segments, "quantum"
+        )
+        assert len(results) == 0
+
+
+class TestCosineHelper:
+    """Test cosine similarity helper."""
+
+    def test_identical(self):
+        from app.services.vector_store import (
+            _cosine_similarity,
         )
 
-        with patch(
-            "app.services.vector_store.index",
-            mock_pinecone_index,
-        ):
-            store = VectorStore()
-            store.index = mock_pinecone_index
+        assert (
+            abs(_cosine_similarity([1, 0], [1, 0]) - 1.0)
+            < 0.001
+        )
 
-            results = await store.search(
-                [0.1] * 1536, "doc-1", top_k=5
-            )
+    def test_orthogonal(self):
+        from app.services.vector_store import (
+            _cosine_similarity,
+        )
 
-            assert len(results) == 1
-            assert results[0]["text"] == "Test text"
-            assert results[0]["score"] == 0.95
+        assert (
+            abs(_cosine_similarity([1, 0], [0, 1])) < 0.001
+        )
 
-    @pytest.mark.asyncio
-    async def test_delete_document(self, mock_pinecone_index):
-        """Test deleting document vectors."""
-        with patch(
-            "app.services.vector_store.index",
-            mock_pinecone_index,
-        ):
-            store = VectorStore()
-            store.index = mock_pinecone_index
+    def test_opposite(self):
+        from app.services.vector_store import (
+            _cosine_similarity,
+        )
 
-            await store.delete_document("doc-1")
-            mock_pinecone_index.delete.assert_called_once()
+        assert (
+            abs(_cosine_similarity([1, 0], [-1, 0]) + 1.0)
+            < 0.001
+        )
 
 
 class TestHelpers:

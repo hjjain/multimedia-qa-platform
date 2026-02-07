@@ -8,11 +8,12 @@ from typing import List
 class Settings(BaseSettings):
     """Application settings loaded from environment variables."""
 
-    # API Keys
-    openai_api_key: str = ""
-    pinecone_api_key: str = ""
-    pinecone_environment: str = "us-east-1"
-    pinecone_index_name: str = "panscience-docs"
+    # Replicate API (for LLM + Whisper)
+    replicate_api_token: str = ""
+
+    # Model configuration
+    llm_model: str = "meta/meta-llama-3-8b-instruct"
+    whisper_model: str = "openai/whisper"
 
     # MongoDB
     mongodb_url: str = "mongodb://mongodb:27017"

@@ -1,15 +1,25 @@
 """Shared test fixtures for mocking external dependencies."""
 
-import pytest
-from unittest.mock import AsyncMock, MagicMock, patch
+import sys
 import os
+from unittest.mock import AsyncMock, MagicMock, patch
+
+# Mock replicate module before any app imports
+# (avoids Pydantic V1 issues on Python 3.14)
+mock_replicate = MagicMock()
+mock_replicate.run = MagicMock(return_value=iter(["test"]))
+sys.modules["replicate"] = mock_replicate
+
+import pytest
 
 # Set test environment variables before any imports
-os.environ["OPENAI_API_KEY"] = "test-key"
-os.environ["PINECONE_API_KEY"] = "test-key"
-os.environ["PINECONE_ENVIRONMENT"] = "us-east-1"
+os.environ["REPLICATE_API_TOKEN"] = "test-token"
 os.environ["MONGODB_URL"] = "mongodb://localhost:27017"
 os.environ["REDIS_URL"] = "redis://localhost:6379"
+
+# Clear settings cache so test env vars are picked up
+from app.config import get_settings
+get_settings.cache_clear()
 
 
 @pytest.fixture
@@ -23,57 +33,10 @@ def mock_mongodb():
 
 
 @pytest.fixture
-def mock_pinecone_index():
-    """Mock Pinecone index for vector operations."""
-    mock_index = MagicMock()
-    mock_index.upsert = MagicMock()
-    mock_index.query = MagicMock(
-        return_value=MagicMock(matches=[])
-    )
-    mock_index.delete = MagicMock()
-    return mock_index
-
-
-@pytest.fixture
-def mock_openai_client():
-    """Mock OpenAI client with embeddings, chat, and transcription."""
-    client = MagicMock()
-
-    # Mock embeddings
-    embedding_response = MagicMock()
-    embedding_data = MagicMock(embedding=[0.1] * 1536)
-    embedding_response.data = [embedding_data]
-    client.embeddings.create.return_value = embedding_response
-
-    # Mock chat completions
-    chat_response = MagicMock()
-    chat_message = MagicMock(content="Test response")
-    chat_choice = MagicMock(message=chat_message)
-    chat_response.choices = [chat_choice]
-    client.chat.completions.create.return_value = chat_response
-
-    # Mock transcriptions
-    transcription_response = MagicMock()
-    transcription_response.text = "Test transcript"
-    transcription_response.segments = [
-        {"start": 0.0, "end": 5.0, "text": "Test segment one"},
-        {"start": 5.0, "end": 10.0, "text": "Test segment two"},
-    ]
-    client.audio.transcriptions.create.return_value = (
-        transcription_response
-    )
-
-    return client
-
-
-@pytest.fixture
-def client(mock_mongodb, mock_pinecone_index, mock_openai_client):
+def client(mock_mongodb):
     """Create a FastAPI TestClient with all mocks applied."""
     with patch(
         "app.services.vector_store.init_pinecone"
-    ), patch(
-        "app.services.vector_store.index",
-        mock_pinecone_index,
     ), patch(
         "app.routers.upload.vector_store"
     ) as mock_vs_upload, patch(
@@ -145,7 +108,7 @@ def client(mock_mongodb, mock_pinecone_index, mock_openai_client):
             )
         )
         mock_emb.get_embeddings_batch = AsyncMock(
-            return_value=[[0.1] * 1536, [0.2] * 1536]
+            return_value=[[0.1] * 256, [0.2] * 256]
         )
         mock_vs_upload.upsert_chunks = AsyncMock(
             return_value=["chunk_0", "chunk_1"]
@@ -156,7 +119,7 @@ def client(mock_mongodb, mock_pinecone_index, mock_openai_client):
 
         # Configure chat service mocks
         mock_chat_emb.get_embedding = AsyncMock(
-            return_value=[0.1] * 1536
+            return_value=[0.1] * 256
         )
         mock_chat_vs.search = AsyncMock(
             return_value=[

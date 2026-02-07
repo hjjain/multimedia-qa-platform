@@ -1,36 +1,31 @@
-"""Audio transcription service using OpenAI Whisper API."""
+"""Audio transcription service using Replicate Whisper."""
 
-import openai
+import os
+import replicate
 from typing import List, Tuple
 from app.models.document import TimestampedSegment
 from app.config import get_settings
 import tempfile
-import os
 
 
 class AudioService:
-    """Handles audio transcription with timestamp extraction."""
+    """Handles audio transcription with timestamp extraction
+    using Whisper via Replicate."""
 
     def __init__(self):
-        self.client = openai.OpenAI(
-            api_key=get_settings().openai_api_key
+        settings = get_settings()
+        os.environ["REPLICATE_API_TOKEN"] = (
+            settings.replicate_api_token
         )
+        self.whisper_model = settings.whisper_model
 
     async def transcribe_with_timestamps(
         self,
         file_content: bytes,
         filename: str,
     ) -> Tuple[str, List[TimestampedSegment]]:
-        """Transcribe audio with segment-level timestamps using Whisper.
-
-        Args:
-            file_content: Raw audio file bytes.
-            filename: Original filename for extension detection.
-
-        Returns:
-            Tuple of (full_transcript, list_of_timestamped_segments)
-        """
-        suffix = os.path.splitext(filename)[1]
+        """Transcribe audio with timestamps using Whisper."""
+        suffix = os.path.splitext(filename)[1] or ".mp3"
         with tempfile.NamedTemporaryFile(
             suffix=suffix, delete=False
         ) as tmp:
@@ -38,22 +33,43 @@ class AudioService:
             tmp_path = tmp.name
 
         try:
-            response = self.client.audio.transcriptions.create(
-                model="whisper-1",
-                file=open(tmp_path, "rb"),
-                response_format="verbose_json",
-                timestamp_granularities=["segment"],
+            output = replicate.run(
+                self.whisper_model,
+                input={
+                    "audio": open(tmp_path, "rb"),
+                    "model": "large-v3",
+                    "transcription": "plain text",
+                },
             )
 
-            full_text = response.text
-            segments = []
+            # Parse Replicate Whisper output
+            if isinstance(output, dict):
+                full_text = output.get(
+                    "transcription", ""
+                )
+                raw_segments = output.get("segments", [])
+            else:
+                full_text = str(output)
+                raw_segments = []
 
-            for segment in response.segments:
+            segments = []
+            for seg in raw_segments:
                 segments.append(
                     TimestampedSegment(
-                        start_time=segment["start"],
-                        end_time=segment["end"],
-                        text=segment["text"],
+                        start_time=float(
+                            seg.get("start", 0)
+                        ),
+                        end_time=float(seg.get("end", 0)),
+                        text=seg.get("text", "").strip(),
+                    )
+                )
+
+            if not segments and full_text:
+                segments.append(
+                    TimestampedSegment(
+                        start_time=0.0,
+                        end_time=0.0,
+                        text=full_text[:500],
                     )
                 )
 
@@ -66,13 +82,10 @@ class AudioService:
         segments: List[TimestampedSegment],
         topic: str,
     ) -> List[TimestampedSegment]:
-        """Find segments relevant to a specific topic.
-
-        Uses keyword matching to identify relevant segments.
-        """
+        """Find segments relevant to a specific topic."""
         topic_lower = topic.lower()
-        relevant = []
-        for seg in segments:
-            if topic_lower in seg.text.lower():
-                relevant.append(seg)
-        return relevant
+        return [
+            seg
+            for seg in segments
+            if topic_lower in seg.text.lower()
+        ]

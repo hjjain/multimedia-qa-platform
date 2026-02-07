@@ -1,7 +1,8 @@
 """Tests for the chat router endpoints."""
 
+import json
 import pytest
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 
 class TestChatEndpoints:
@@ -131,3 +132,51 @@ class TestChatEndpoints:
         )
 
         assert response.status_code == 404
+
+    def test_stream_success(self, client, mock_mongodb):
+        """Test successful streaming chat response."""
+        mock_mongodb.find_one = AsyncMock(
+            return_value={
+                "_id": "test-id",
+                "timestamps": None,
+            }
+        )
+
+        with patch(
+            "app.routers.chat.embedding_service"
+        ) as mock_emb, patch(
+            "app.routers.chat.vector_store"
+        ) as mock_vs, patch(
+            "app.routers.chat.llm_service"
+        ) as mock_llm:
+            mock_emb.get_embedding = AsyncMock(
+                return_value=[0.1] * 256
+            )
+            mock_vs.search = AsyncMock(
+                return_value=[
+                    {
+                        "text": "Context",
+                        "score": 0.9,
+                        "chunk_index": 0,
+                    }
+                ]
+            )
+
+            async def mock_stream(*args, **kwargs):
+                yield "Hello "
+                yield "world"
+
+            mock_llm.stream_answer = mock_stream
+
+            response = client.post(
+                "/api/chat/stream",
+                json={
+                    "document_id": "test-id",
+                    "question": "What?",
+                    "conversation_history": [],
+                },
+            )
+
+            assert response.status_code == 200
+            text = response.text
+            assert "Hello" in text or "data:" in text

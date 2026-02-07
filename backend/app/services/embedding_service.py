@@ -1,45 +1,43 @@
-"""Embedding service using OpenAI text-embedding-3-small model."""
+"""Local embedding service using hash-based vector generation."""
 
-from openai import OpenAI
+import hashlib
+import math
 from typing import List
-from app.config import get_settings
 
 
 class EmbeddingService:
-    """Generates text embeddings using OpenAI's embedding API."""
+    """Generates text embeddings locally using deterministic
+    hash-based vectors. No external API needed."""
 
-    def __init__(self):
-        self.client = OpenAI(
-            api_key=get_settings().openai_api_key
-        )
-        self.model = "text-embedding-3-small"
+    DIMENSIONS = 256
 
     async def get_embedding(self, text: str) -> List[float]:
-        """Get embedding vector for a single text.
-
-        Args:
-            text: Input text to embed.
-
-        Returns:
-            List of floats representing the embedding vector.
-        """
-        response = self.client.embeddings.create(
-            model=self.model, input=text
-        )
-        return response.data[0].embedding
+        """Get embedding vector for a single text."""
+        return self._hash_embedding(text)
 
     async def get_embeddings_batch(
         self, texts: List[str]
     ) -> List[List[float]]:
-        """Get embeddings for multiple texts in a single API call.
+        """Get embeddings for multiple texts."""
+        return [self._hash_embedding(t) for t in texts]
 
-        Args:
-            texts: List of input texts to embed.
+    def _hash_embedding(self, text: str) -> List[float]:
+        """Create a deterministic embedding from text.
 
-        Returns:
-            List of embedding vectors.
+        Uses word-level hashing to build a fixed-size vector.
+        Words that appear in both query and document produce
+        similar vectors via cosine similarity.
         """
-        response = self.client.embeddings.create(
-            model=self.model, input=texts
-        )
-        return [item.embedding for item in response.data]
+        words = text.lower().split()
+        vec = [0.0] * self.DIMENSIONS
+
+        for word in words:
+            h = int(
+                hashlib.md5(word.encode()).hexdigest(), 16
+            )
+            for j in range(self.DIMENSIONS):
+                vec[j] += math.sin(h * (j + 1))
+
+        # Normalize to unit vector
+        norm = math.sqrt(sum(v * v for v in vec)) or 1.0
+        return [v / norm for v in vec]

@@ -1,7 +1,7 @@
 """PDF processing service for text extraction and chunking."""
 
 from pypdf import PdfReader
-from langchain.text_splitter import RecursiveCharacterTextSplitter
+from langchain_text_splitters import RecursiveCharacterTextSplitter
 from typing import List, Tuple
 import io
 

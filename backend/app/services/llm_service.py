@@ -1,6 +1,7 @@
-"""LLM service for summarization and question answering."""
+"""LLM service using Replicate (Llama) for summarization and Q&A."""
 
-from openai import OpenAI
+import os
+import replicate
 from typing import List, Optional, AsyncGenerator
 from app.models.chat import ChatMessage
 from app.models.document import TimestampedSegment
@@ -8,45 +9,35 @@ from app.config import get_settings
 
 
 class LLMService:
-    """Handles AI-powered summarization and Q&A using OpenAI GPT."""
+    """Handles summarization and Q&A using Replicate Llama."""
 
     def __init__(self):
-        self.client = OpenAI(
-            api_key=get_settings().openai_api_key
+        settings = get_settings()
+        os.environ["REPLICATE_API_TOKEN"] = (
+            settings.replicate_api_token
         )
-        self.model = "gpt-4-turbo-preview"
+        self.model = settings.llm_model
 
     async def generate_summary(self, text: str) -> str:
-        """Generate a concise summary of document content.
-
-        Args:
-            text: Full document text to summarize.
-
-        Returns:
-            Summary string.
-        """
-        response = self.client.chat.completions.create(
-            model=self.model,
-            messages=[
-                {
-                    "role": "system",
-                    "content": (
-                        "You are a helpful assistant that summarizes "
-                        "documents concisely. Provide a clear, "
-                        "structured summary highlighting key points."
-                    ),
-                },
-                {
-                    "role": "user",
-                    "content": (
-                        "Please summarize the following content:"
-                        f"\n\n{text[:15000]}"
-                    ),
-                },
-            ],
-            max_tokens=500,
+        """Generate summary of document content."""
+        output = replicate.run(
+            self.model,
+            input={
+                "prompt": (
+                    "Please summarize the following content "
+                    "concisely, highlighting key points:"
+                    f"\n\n{text[:10000]}"
+                ),
+                "system_prompt": (
+                    "You are a helpful assistant that "
+                    "summarizes documents. Provide a clear, "
+                    "structured summary."
+                ),
+                "max_tokens": 500,
+                "temperature": 0.3,
+            },
         )
-        return response.choices[0].message.content
+        return "".join(output)
 
     async def answer_question(
         self,
@@ -55,17 +46,7 @@ class LLMService:
         timestamps: Optional[List[TimestampedSegment]] = None,
         conversation_history: Optional[List[ChatMessage]] = None,
     ) -> tuple:
-        """Answer a question based on retrieved context chunks.
-
-        Args:
-            question: User's question.
-            context_chunks: Relevant document chunks.
-            timestamps: Optional media timestamps.
-            conversation_history: Previous conversation messages.
-
-        Returns:
-            Tuple of (answer_string, relevant_timestamps_or_None)
-        """
+        """Answer question based on retrieved context."""
         if conversation_history is None:
             conversation_history = []
 
@@ -73,59 +54,50 @@ class LLMService:
 
         system_prompt = (
             "You are a helpful assistant answering questions "
-            "based on document content.\n"
+            "based on document content. "
             "Answer based ONLY on the provided context. "
-            "If the answer isn't in the context, say so.\n"
-            "If timestamps are provided and relevant to the "
-            "answer, reference them."
+            "If the answer isn't in the context, say so. "
+            "If timestamps are provided, reference them."
         )
 
         if timestamps:
-            timestamp_text = "\n".join(
+            ts_text = "\n".join(
                 [
-                    f"[{seg.start_time:.1f}s - {seg.end_time:.1f}s]"
-                    f": {seg.text}"
-                    for seg in timestamps
+                    f"[{s.start_time:.1f}s - {s.end_time:.1f}s]"
+                    f": {s.text}"
+                    for s in timestamps
                 ]
             )
-            context += (
-                f"\n\nTimestamped Transcript:\n{timestamp_text}"
-            )
+            context += f"\n\nTimestamped Transcript:\n{ts_text}"
 
-        messages = [
-            {"role": "system", "content": system_prompt}
-        ]
-
-        # Add last 3 exchanges from conversation history
+        # Build prompt with history
+        prompt_parts = []
         for msg in conversation_history[-6:]:
-            messages.append(
-                {"role": msg.role, "content": msg.content}
-            )
-
-        messages.append(
-            {
-                "role": "user",
-                "content": (
-                    f"Context:\n{context}\n\nQuestion: {question}"
-                ),
-            }
+            role = "User" if msg.role == "user" else "Assistant"
+            prompt_parts.append(f"{role}: {msg.content}")
+        prompt_parts.append(
+            f"Context:\n{context}\n\nQuestion: {question}"
         )
+        prompt = "\n\n".join(prompt_parts)
 
-        response = self.client.chat.completions.create(
-            model=self.model,
-            messages=messages,
-            max_tokens=1000,
+        output = replicate.run(
+            self.model,
+            input={
+                "prompt": prompt,
+                "system_prompt": system_prompt,
+                "max_tokens": 1000,
+                "temperature": 0.5,
+            },
         )
+        answer = "".join(output)
 
-        answer = response.choices[0].message.content
-
-        # Find relevant timestamps if available
         relevant_timestamps = None
         if timestamps:
             relevant_timestamps = (
-                self._find_relevant_timestamps(answer, timestamps)
+                self._find_relevant_timestamps(
+                    answer, timestamps
+                )
             )
-
         return answer, relevant_timestamps
 
     def _find_relevant_timestamps(
@@ -133,19 +105,14 @@ class LLMService:
         answer: str,
         timestamps: List[TimestampedSegment],
     ) -> List[dict]:
-        """Find timestamps that are relevant to the answer.
-
-        Matches words longer than 4 characters from segment text
-        against the answer content.
-        """
+        """Find timestamps mentioned or relevant to answer."""
         relevant = []
         answer_lower = answer.lower()
 
         for seg in timestamps:
-            words = seg.text.lower().split()
             if any(
                 word in answer_lower
-                for word in words
+                for word in seg.text.lower().split()
                 if len(word) > 4
             ):
                 relevant.append(
@@ -155,8 +122,7 @@ class LLMService:
                         "text": seg.text,
                     }
                 )
-
-        return relevant[:5]  # Limit to top 5
+        return relevant[:5]
 
     async def stream_answer(
         self,
@@ -164,39 +130,25 @@ class LLMService:
         context_chunks: List[str],
         conversation_history: Optional[List[ChatMessage]] = None,
     ) -> AsyncGenerator[str, None]:
-        """Stream answer tokens for real-time response.
-
-        Yields:
-            Individual content tokens as strings.
-        """
+        """Stream answer tokens for real-time response."""
         if conversation_history is None:
             conversation_history = []
 
         context = "\n\n".join(context_chunks)
 
-        messages = [
-            {
-                "role": "system",
-                "content": (
-                    "Answer based only on the provided context."
-                ),
-            },
-            {
-                "role": "user",
-                "content": (
+        output = replicate.run(
+            self.model,
+            input={
+                "prompt": (
                     f"Context:\n{context}\n\n"
                     f"Question: {question}"
                 ),
+                "system_prompt": (
+                    "Answer based only on the context."
+                ),
+                "max_tokens": 1000,
+                "temperature": 0.5,
             },
-        ]
-
-        stream = self.client.chat.completions.create(
-            model=self.model,
-            messages=messages,
-            max_tokens=1000,
-            stream=True,
         )
-
-        for chunk in stream:
-            if chunk.choices[0].delta.content:
-                yield chunk.choices[0].delta.content
+        for token in output:
+            yield token

@@ -1,38 +1,33 @@
-"""Vector store service using Pinecone for semantic search."""
+"""In-memory vector store with cosine similarity search."""
 
-from pinecone import Pinecone, ServerlessSpec
+import math
 from typing import List, Dict, Any
-from app.config import get_settings
 
-settings = get_settings()
-pc = None
-index = None
+# In-memory document store: {doc_id: [entry, ...]}
+_store: Dict[str, List[dict]] = {}
 
 
 def init_pinecone():
-    """Initialize the Pinecone client and create index if needed."""
-    global pc, index
-    pc = Pinecone(api_key=settings.pinecone_api_key)
+    """Initialize vector store (in-memory, no external service)."""
+    print("Vector store initialized (in-memory mode).")
 
-    # Create index if it does not exist
-    if settings.pinecone_index_name not in pc.list_indexes().names():
-        pc.create_index(
-            name=settings.pinecone_index_name,
-            dimension=1536,  # text-embedding-3-small dimension
-            metric="cosine",
-            spec=ServerlessSpec(
-                cloud="aws", region="us-east-1"
-            ),
-        )
 
-    index = pc.Index(settings.pinecone_index_name)
+def _cosine_similarity(
+    a: List[float], b: List[float]
+) -> float:
+    """Compute cosine similarity between two vectors."""
+    dot = sum(x * y for x, y in zip(a, b))
+    norm_a = math.sqrt(sum(x * x for x in a)) or 1.0
+    norm_b = math.sqrt(sum(x * x for x in b)) or 1.0
+    return dot / (norm_a * norm_b)
 
 
 class VectorStore:
-    """Manages document chunk storage and retrieval in Pinecone."""
+    """In-memory vector store for document chunk retrieval.
 
-    def __init__(self):
-        self.index = index
+    Stores embeddings and performs cosine similarity search.
+    In production, swap for Pinecone/FAISS.
+    """
 
     async def upsert_chunks(
         self,
@@ -40,41 +35,26 @@ class VectorStore:
         chunks: List[str],
         embeddings: List[List[float]],
     ) -> List[str]:
-        """Store document chunks with their embeddings.
-
-        Args:
-            document_id: Unique document identifier.
-            chunks: List of text chunks.
-            embeddings: Corresponding embedding vectors.
-
-        Returns:
-            List of chunk IDs stored in Pinecone.
-        """
+        """Store document chunks with embeddings."""
         chunk_ids = []
-        vectors = []
+        entries = []
 
-        for i, (chunk, embedding) in enumerate(
+        for i, (chunk, emb) in enumerate(
             zip(chunks, embeddings)
         ):
             chunk_id = f"{document_id}_{i}"
             chunk_ids.append(chunk_id)
-            vectors.append(
+            entries.append(
                 {
                     "id": chunk_id,
-                    "values": embedding,
-                    "metadata": {
-                        "document_id": document_id,
-                        "chunk_index": i,
-                        "text": chunk[:1000],
-                    },
+                    "values": emb,
+                    "document_id": document_id,
+                    "chunk_index": i,
+                    "text": chunk[:1000],
                 }
             )
 
-        # Upsert in batches of 100
-        for i in range(0, len(vectors), 100):
-            batch = vectors[i : i + 100]
-            self.index.upsert(vectors=batch)
-
+        _store[document_id] = entries
         return chunk_ids
 
     async def search(
@@ -83,34 +63,25 @@ class VectorStore:
         document_id: str,
         top_k: int = 5,
     ) -> List[Dict[str, Any]]:
-        """Search for relevant chunks using vector similarity.
+        """Search for relevant chunks by cosine similarity."""
+        entries = _store.get(document_id, [])
+        scored = []
 
-        Args:
-            query_embedding: Query vector.
-            document_id: Filter results to this document.
-            top_k: Number of results to return.
+        for entry in entries:
+            score = _cosine_similarity(
+                query_embedding, entry["values"]
+            )
+            scored.append(
+                {
+                    "text": entry["text"],
+                    "score": score,
+                    "chunk_index": entry["chunk_index"],
+                }
+            )
 
-        Returns:
-            List of matching chunks with text, score, and index.
-        """
-        results = self.index.query(
-            vector=query_embedding,
-            top_k=top_k,
-            include_metadata=True,
-            filter={"document_id": {"$eq": document_id}},
-        )
-
-        return [
-            {
-                "text": match.metadata.get("text", ""),
-                "score": match.score,
-                "chunk_index": match.metadata.get("chunk_index"),
-            }
-            for match in results.matches
-        ]
+        scored.sort(key=lambda x: x["score"], reverse=True)
+        return scored[:top_k]
 
     async def delete_document(self, document_id: str):
-        """Delete all chunks for a document from Pinecone."""
-        self.index.delete(
-            filter={"document_id": {"$eq": document_id}}
-        )
+        """Delete all chunks for a document."""
+        _store.pop(document_id, None)

@@ -5,11 +5,11 @@ An AI-powered full-stack web application for document and multimedia question-an
 ## Features
 
 - **Multi-format Upload** - Support for PDF, audio (MP3, WAV, M4A), and video (MP4, WebM) files
-- **AI-Powered Q&A** - RAG-based chatbot using OpenAI GPT-4 for accurate, context-aware answers
+- **AI-Powered Q&A** - RAG-based chatbot using LangChain + Llama 3 for accurate, context-aware answers
 - **Automatic Summarization** - AI-generated summaries for all uploaded content
-- **Timestamp Extraction** - Segment-level timestamps for audio/video via OpenAI Whisper
+- **Timestamp Extraction** - Segment-level timestamps for audio/video via Whisper
 - **Click-to-Play** - Navigate to specific timestamps in media files directly from chat responses
-- **Semantic Search** - Vector search using Pinecone for finding the most relevant content
+- **Semantic Search** - In-memory vector search with cosine similarity for finding relevant content
 - **Real-time Streaming** - Server-Sent Events for streaming chat responses
 - **Searchable Timestamps** - Search through audio/video timestamps by keyword
 
@@ -19,8 +19,8 @@ An AI-powered full-stack web application for document and multimedia question-an
 |-------|-----------|
 | **Backend** | FastAPI (Python 3.11) |
 | **Frontend** | React 18, Vite, Tailwind CSS |
-| **AI/ML** | OpenAI GPT-4 Turbo, Whisper API, text-embedding-3-small |
-| **Vector DB** | Pinecone (serverless, cosine similarity) |
+| **AI/ML** | Replicate (Llama 3 for LLM, Whisper for transcription) |
+| **Vector Search** | In-memory cosine similarity (swappable for Pinecone/FAISS) |
 | **Database** | MongoDB 7 (document metadata) |
 | **Cache** | Redis 7 |
 | **Containerization** | Docker & Docker Compose |
@@ -30,25 +30,25 @@ An AI-powered full-stack web application for document and multimedia question-an
 
 ```
 ┌─────────────────┐     ┌─────────────────┐     ┌─────────────────┐
-│   React + Vite  │────▶│    FastAPI       │────▶│    OpenAI API   │
-│   Frontend      │◀────│    Backend       │◀────│  GPT-4 / Whisper│
+│   React + Vite  │────▶│    FastAPI       │────▶│   Replicate API │
+│   Frontend      │◀────│    Backend       │◀────│ Llama 3/Whisper │
 └─────────────────┘     └────────┬────────┘     └─────────────────┘
                                  │
                 ┌────────────────┼────────────────┐
                 ▼                ▼                ▼
          ┌───────────┐   ┌───────────┐   ┌───────────┐
-         │  MongoDB   │   │  Pinecone  │   │   Redis   │
-         │  Metadata  │   │  Vectors   │   │   Cache   │
+         │  MongoDB   │   │  Vector   │   │   Redis   │
+         │  Metadata  │   │  Store    │   │   Cache   │
          └───────────┘   └───────────┘   └───────────┘
 ```
 
 ### How It Works
 
 1. **Upload** - User uploads a file (PDF/audio/video)
-2. **Processing** - Backend extracts text (PDF) or transcribes (audio/video with timestamps)
-3. **Embedding** - Text chunks are embedded using `text-embedding-3-small` and stored in Pinecone
-4. **Summarization** - GPT-4 generates a concise summary
-5. **Q&A** - User asks questions; relevant chunks are retrieved via vector search and passed to GPT-4
+2. **Processing** - Backend extracts text (PDF) or transcribes (audio/video with timestamps via Whisper)
+3. **Embedding** - Text chunks are embedded locally and stored in an in-memory vector store
+4. **Summarization** - Llama 3 generates a concise summary via Replicate
+5. **Q&A** - User asks questions; relevant chunks are retrieved via cosine similarity and passed to Llama 3
 6. **Timestamps** - For media files, relevant timestamps are linked to answers with playback support
 
 ## Quick Start
@@ -56,8 +56,7 @@ An AI-powered full-stack web application for document and multimedia question-an
 ### Prerequisites
 
 - [Docker](https://docs.docker.com/get-docker/) & [Docker Compose](https://docs.docker.com/compose/install/)
-- [OpenAI API Key](https://platform.openai.com/api-keys)
-- [Pinecone API Key](https://www.pinecone.io/)
+- [Replicate API Token](https://replicate.com/account/api-tokens) (free tier available)
 
 ### Setup
 
@@ -74,18 +73,16 @@ An AI-powered full-stack web application for document and multimedia question-an
    cp .env.example .env
    ```
 
-   Edit `.env` and add your API keys:
+   Edit `.env` and add your Replicate API token:
 
    ```env
-   OPENAI_API_KEY=sk-your-openai-key
-   PINECONE_API_KEY=your-pinecone-key
-   PINECONE_ENVIRONMENT=us-east-1
+   REPLICATE_API_TOKEN=r8_your_replicate_token_here
    ```
 
 3. **Start the application:**
 
    ```bash
-   docker-compose up --build
+   docker compose up --build
    ```
 
 4. **Access the app:**
@@ -176,7 +173,7 @@ pip install -r requirements.txt
 pytest -v --cov=app --cov-report=html --cov-report=term-missing
 ```
 
-**Coverage target: 95%+**
+**Coverage: 98%** (target: 95%+)
 
 View the HTML coverage report at `backend/htmlcov/index.html`.
 
@@ -187,6 +184,7 @@ pytest tests/test_upload.py -v      # Upload endpoint tests
 pytest tests/test_chat.py -v        # Chat endpoint tests
 pytest tests/test_media.py -v       # Media endpoint tests
 pytest tests/test_services.py -v    # Service unit tests
+pytest tests/test_video.py -v       # Video processing tests
 ```
 
 ## Development (Without Docker)
@@ -200,8 +198,7 @@ source venv/bin/activate  # or venv\Scripts\activate on Windows
 pip install -r requirements.txt
 
 # Set environment variables
-export OPENAI_API_KEY=your-key
-export PINECONE_API_KEY=your-key
+export REPLICATE_API_TOKEN=your-token
 export MONGODB_URL=mongodb://localhost:27017
 export REDIS_URL=redis://localhost:6379
 
@@ -223,7 +220,6 @@ npm run dev  # Starts on http://localhost:5173
 multimedia-qa-platform/
 ├── backend/
 │   ├── app/
-│   │   ├── __init__.py
 │   │   ├── main.py              # FastAPI application entry point
 │   │   ├── config.py            # Settings from environment variables
 │   │   ├── models/
@@ -237,9 +233,9 @@ multimedia-qa-platform/
 │   │   │   ├── pdf_service.py   # PDF text extraction & chunking
 │   │   │   ├── audio_service.py # Audio transcription with Whisper
 │   │   │   ├── video_service.py # Video audio extraction & transcription
-│   │   │   ├── embedding_service.py  # OpenAI embeddings
-│   │   │   ├── vector_store.py  # Pinecone vector operations
-│   │   │   └── llm_service.py   # GPT-4 summarization & Q&A
+│   │   │   ├── embedding_service.py  # Local hash-based embeddings
+│   │   │   ├── vector_store.py  # In-memory vector search
+│   │   │   └── llm_service.py   # Replicate Llama summarization & Q&A
 │   │   └── utils/
 │   │       └── helpers.py       # Utility functions
 │   ├── tests/
@@ -247,7 +243,8 @@ multimedia-qa-platform/
 │   │   ├── test_upload.py       # Upload endpoint tests
 │   │   ├── test_chat.py         # Chat endpoint tests
 │   │   ├── test_media.py        # Media endpoint tests
-│   │   └── test_services.py     # Service unit tests
+│   │   ├── test_services.py     # Service unit tests
+│   │   └── test_video.py        # Video processing tests
 │   ├── Dockerfile
 │   ├── requirements.txt
 │   └── pytest.ini
@@ -289,12 +286,11 @@ The GitHub Actions workflow (`.github/workflows/ci.yml`) runs on every push and 
 
 | Variable | Required | Default | Description |
 |----------|----------|---------|-------------|
-| `OPENAI_API_KEY` | Yes | - | OpenAI API key for GPT-4 and Whisper |
-| `PINECONE_API_KEY` | Yes | - | Pinecone API key for vector storage |
-| `PINECONE_ENVIRONMENT` | No | `us-east-1` | Pinecone cloud region |
-| `PINECONE_INDEX_NAME` | No | `panscience-docs` | Pinecone index name |
+| `REPLICATE_API_TOKEN` | Yes | - | Replicate API token for Llama 3 and Whisper |
 | `MONGODB_URL` | No | `mongodb://mongodb:27017` | MongoDB connection string |
 | `REDIS_URL` | No | `redis://redis:6379` | Redis connection string |
+| `LLM_MODEL` | No | `meta/meta-llama-3-8b-instruct` | Replicate LLM model |
+| `WHISPER_MODEL` | No | `openai/whisper` | Replicate Whisper model |
 | `MAX_FILE_SIZE_MB` | No | `100` | Maximum upload file size in MB |
 
 ## License
