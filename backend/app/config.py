@@ -13,7 +13,7 @@ class Settings(BaseSettings):
 
     # Model configuration
     llm_model: str = "openai/gpt-5.2"
-    whisper_model: str = "openai/whisper"
+    whisper_model: str = "openai/whisper:8099696689d249cf8b122d833c36ac3f75505c666a395ca40ef26f68e7d3d16e"
 
     # MongoDB
     mongodb_url: str = "mongodb://mongodb:27017"

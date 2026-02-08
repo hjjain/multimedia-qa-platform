@@ -1,5 +1,6 @@
 import React from 'react';
 import { FileText } from 'lucide-react';
+import ReactMarkdown from 'react-markdown';
 
 /**
  * Summary component that displays the AI-generated summary
@@ -28,10 +29,8 @@ export default function Summary({ summary, filename, fileType }) {
           </div>
         </div>
       </div>
-      <div className="prose prose-sm max-w-none">
-        <p className="text-gray-700 whitespace-pre-wrap leading-relaxed">
-          {summary}
-        </p>
+      <div className="prose prose-sm max-w-none text-gray-700 leading-relaxed">
+        <ReactMarkdown>{summary}</ReactMarkdown>
       </div>
     </div>
   );

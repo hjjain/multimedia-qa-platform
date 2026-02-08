@@ -37,32 +37,41 @@ class AudioService:
                 self.whisper_model,
                 input={
                     "audio": open(tmp_path, "rb"),
-                    "model": "large-v3",
+                    "language": "auto",
+                    "translate": False,
+                    "temperature": 0,
                     "transcription": "plain text",
+                    "suppress_tokens": "-1",
+                    "no_speech_threshold": 0.6,
+                    "condition_on_previous_text": True,
+                    "compression_ratio_threshold": 2.4,
+                    "temperature_increment_on_fallback": 0.2,
                 },
             )
 
             # Parse Replicate Whisper output
+            full_text = ""
+            segments = []
+
             if isinstance(output, dict):
                 full_text = output.get(
                     "transcription", ""
                 )
                 raw_segments = output.get("segments", [])
+                for seg in raw_segments:
+                    start = float(seg.get("start", 0))
+                    end = float(seg.get("end", 0))
+                    text = seg.get("text", "").strip()
+                    if text:
+                        segments.append(
+                            TimestampedSegment(
+                                start_time=start,
+                                end_time=end,
+                                text=text,
+                            )
+                        )
             else:
                 full_text = str(output)
-                raw_segments = []
-
-            segments = []
-            for seg in raw_segments:
-                segments.append(
-                    TimestampedSegment(
-                        start_time=float(
-                            seg.get("start", 0)
-                        ),
-                        end_time=float(seg.get("end", 0)),
-                        text=seg.get("text", "").strip(),
-                    )
-                )
 
             if not segments and full_text:
                 segments.append(

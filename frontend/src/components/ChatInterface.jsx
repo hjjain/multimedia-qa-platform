@@ -1,5 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { Send, Loader2 } from 'lucide-react';
+import ReactMarkdown from 'react-markdown';
 import { sendMessage, streamMessage } from '../services/api';
 
 /**
@@ -123,7 +124,13 @@ export default function ChatInterface({ documentId, onTimestampClick }) {
                     : 'bg-gray-100 text-gray-800'
               }`}
             >
-              <p className="whitespace-pre-wrap">{msg.content}</p>
+              {msg.role === 'user' ? (
+                <p className="whitespace-pre-wrap">{msg.content}</p>
+              ) : (
+                <div className="prose prose-sm max-w-none prose-p:my-1 prose-headings:my-2 prose-ul:my-1 prose-ol:my-1 prose-li:my-0.5 prose-strong:text-inherit">
+                  <ReactMarkdown>{msg.content}</ReactMarkdown>
+                </div>
+              )}
 
               {/* Timestamp links */}
               {msg.timestamps && msg.timestamps.length > 0 && (
