@@ -42,4 +42,5 @@ class UploadResponse(BaseModel):
     filename: str
     file_type: FileType
     summary: str
+    timestamps: Optional[List[TimestampedSegment]] = None
     message: str

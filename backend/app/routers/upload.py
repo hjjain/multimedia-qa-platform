@@ -137,6 +137,7 @@ async def upload_file(file: UploadFile = File(...)):
         filename=file.filename,
         file_type=file_type,
         summary=summary,
+        timestamps=timestamps,
         message="File processed successfully",
     )
 

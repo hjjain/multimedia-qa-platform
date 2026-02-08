@@ -11,6 +11,7 @@ mock_replicate.run = MagicMock(return_value=iter(["test"]))
 sys.modules["replicate"] = mock_replicate
 
 import pytest
+from app.models.document import TimestampedSegment
 
 # Set test environment variables before any imports
 os.environ["REPLICATE_API_TOKEN"] = "test-token"
@@ -69,42 +70,21 @@ def client(mock_mongodb):
         mock_pdf.process_pdf = AsyncMock(
             return_value=("Test PDF text", ["chunk1", "chunk2"])
         )
+        test_segment = TimestampedSegment(
+            start_time=0.0,
+            end_time=5.0,
+            text="Test segment",
+        )
         mock_audio.transcribe_with_timestamps = AsyncMock(
             return_value=(
                 "Test transcript",
-                [
-                    MagicMock(
-                        text="Test segment",
-                        start_time=0.0,
-                        end_time=5.0,
-                        model_dump=MagicMock(
-                            return_value={
-                                "start_time": 0.0,
-                                "end_time": 5.0,
-                                "text": "Test segment",
-                            }
-                        ),
-                    )
-                ],
+                [test_segment],
             )
         )
         mock_video.process_video = AsyncMock(
             return_value=(
                 "Test transcript",
-                [
-                    MagicMock(
-                        text="Test segment",
-                        start_time=0.0,
-                        end_time=5.0,
-                        model_dump=MagicMock(
-                            return_value={
-                                "start_time": 0.0,
-                                "end_time": 5.0,
-                                "text": "Test segment",
-                            }
-                        ),
-                    )
-                ],
+                [test_segment],
             )
         )
         mock_emb.get_embeddings_batch = AsyncMock(
